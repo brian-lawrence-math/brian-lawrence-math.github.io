@@ -3,7 +3,7 @@
 I was working on [mytorch][repo], a mock tensor library for GPU, 
 and I decided to spend some time optimizing the matrix multiplication function.
 After all, matrix multiplication is the most expensive operation in deep learning,
-and optimizing batched matrix multiplication is a rite of passage in performance computing.
+and optimizing batched matrix multiplication is something of a rite of passage in performance computing.
 
 If you're writing a production tensor library like Pytorch, 
 your code needs to be fast in many different settings:
