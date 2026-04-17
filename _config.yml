@@ -31,6 +31,10 @@ theme: minima
 plugins:
   - jekyll-feed
 
+collections:
+  posts:
+    output: true
+
 kramdown:
   math_engine: null
 # Exclude from processing.
