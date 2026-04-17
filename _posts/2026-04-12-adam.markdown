@@ -1,7 +1,5 @@
 # The Adam optimizer
 
-(Work in progress)
-
 [Adam][adam] is a widely-used optimization algorithm 
 that tends to perform very well on deep learning tasks.
 
@@ -20,11 +18,14 @@ I'd like to offer a different take on Adam -- less calculus, more statistics.
 My take will suggest a different toy model of an optimizer:
 not stochastic gradient descent, but an algorithm that only looks at the sign
 (not the magnitude) of each gradient.
-I'll test out this algorithm on a simple machine learning task: building an MNIST classifier.
+I call my optimizer GradSign.
+I'll test it out on a simple machine learning task: building an MNIST classifier.
 
-Spoiler alert: No, the new optimizer doesn't outperform Adam.
-But it is interesting to see that it works at all -- it is comparable to plain SGD --
-and I hope you find my perspective interesting.
+Spoiler alert: No, GradSign doesn't outperform Adam.
+In my small experiment, my optimizer performs comparably to Adam,
+but SGD (surprisingly) outperforms them both.
+
+I hope reading this inspires you to tinker and explore.
 
 This post has three parts:
 - My reinterpretation of Adam
@@ -89,7 +90,7 @@ but it will help us build a clean mental model.
 
 Finally, I will assume $\beta_1 = \beta_2$, or in other words that the two moving averages
 are computed over the same size of window $n_1 = n_2$.
-Unlike the first two simplifications, assuming $\beta_1 = \beta_2$ really does change the behavior of the optimizer in an interesting way.
+Unlike the first two simplifications, assuming $\beta_1 = \beta_2$ really does change the behavior of the optimizer in a meaningful way.
 I'll come back to this later, because I want to understand this simplified model first.
 
 So, let's say $\beta_1 = \beta_2 = 0.99$, so now $m_t$ and $v_t$ are averages
@@ -162,6 +163,33 @@ but first I want to wrap up a couple of loose ends.
 
 ## The role of $\beta_1$ and $\beta_2$
 
+Earlier on, we made the simplifying assumption that $\beta_1 = \beta_2$.
+I told you that we were simplifying away something important, but I didn't tell you what.
+Now it's time to fix that.
+
+In the real world, some good values for $\beta_1$ and $\beta_2$ are 
+\\[  \beta_1 = 0.9  \\]
+\\[  \beta_2 = 0.999.  \\]
+In other words,
+the first moment estimate (the numerator) averages the gradient over the last 
+10 or so timesteps,
+while the second moment (the denominator) averages its square over the last 1000.
+
+Normally, you might think, this won't make a big difference.
+But it makes a big difference when the gradient is *sparse*.
+
+Imagine a parameter that is usually unimportant: its gradient is close to zero.
+But every so often, the parameter becomes very important, and its gradient gets big.
+(You might imagine that in a large, complex LLM, this one parameter is responsible for
+learning one particular thing -- and that one thing only rarely shows up in the training data.)
+
+The role of $\beta_2$ is to remember that this gradient has a track record of sudden spikes.
+When a gradient has spiked in the past, we don't want to make updates based on small gradients.
+But we also don't want to continue making updates based on a gradient
+from many steps back.
+The solution is to make $\beta_2$ large (remember the spike and slow down learning for 1000 steps)
+but keep $\beta_1$ small (stop making updates 10 steps after the spike).
+
 ## Adam and memory
 
 The Adam optimizer stores two floating-point values (the moment estimates $m_t$ and $v_t$)
@@ -176,17 +204,50 @@ so the optimizer is responsible for about half the total memory usage.
 
 Wouldn't it be great if we could use less?
 
-## Grad-sign
+## GradSign
 
-(explanation of my own optimizer, to follow)
+GradSign is a simple proof-of-concept optimizer that:
+- only uses the sign (+ or -) of the gradient of each parameter, and
+- only keeps one byte of optimizer data, per parameter.
+
+The update code is as follows:
+
+{% highlight python %}
+def step(self):
+    for n, p in self.named_params:
+        new_count = 2 * (p.grad > 0) - 1
+        self.grad_counts[n] -= (self.grad_counts[n] + 4) // 8
+        self.grad_counts[n] += 8 * new_count
+
+        p.data -= self.lr * (self.grad_counts[n] / 64.0)
+{% endhighlight %}
+
+The dictionary '''self.grad_counts''' stores, for each parameter,
+a quantized exponential moving average of the sign of the gradient
+over the past several timesteps.
+The moving average has a characteristic timescale of 8 timesteps
+(in other words, $\beta = 0.875$).
+The quantized moving average is scaled to be between $-64$ and $64$, 
+so that it fits within a signed 8-bit integer.
+
+I chose these parameters to control quantization error in the decay term
+'''self.grad_counts[n] -= (self.grad_counts[n] + 4) // 8.'''
+The decay term will be nonzero as soon as the value '''self.grad_counts''' exceeds $\pm 4$.
+Each update to the average causes the count to change by $\pm 8$, 
+so the '''grad_counts''' parameter cannot get stuck in the no-decay region.
+
+## Experiment
+
+The experiment code and detailed results are posted on [Github][repo].
+
+In summary, I run the GradSign on 1000 batches of 32 samples each,
+which amounts to a single pass through just over half of the dataset.
+The resulting model achieves over 98% performance.
 
 
 
 
-
-
-
-
+[repo]: https://github.com/brian-lawrence-math/mnist
 [adam]: https://arxiv.org/pdf/1412.6980
 [wiki]: https://en.wikipedia.org/wiki/Stochastic_gradient_descent#Adam
 [blog1]: https://medium.com/@weidagang/demystifying-the-adam-optimizer-in-machine-learning-4401d162cb9e
