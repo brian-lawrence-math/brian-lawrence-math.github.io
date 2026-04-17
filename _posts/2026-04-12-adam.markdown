@@ -1,3 +1,14 @@
+---
+title: Understanding the Adam optimizer
+date: April 2026
+---
+
+In this post I'll offer my own somewhat contrarian explanation
+of why the Adam optimizer works.
+
+Then I'll demonstrate my explanation with some [experiments][repo] on
+a simple proof-of-concept optimizer I made up, called GradSign.
+
 # The Adam optimizer
 
 [Adam][adam] is a widely-used optimization algorithm 
