@@ -34,6 +34,7 @@ plugins:
 collections:
   posts:
     output: true
+    permalink: /:name/
 
 kramdown:
   math_engine: null
