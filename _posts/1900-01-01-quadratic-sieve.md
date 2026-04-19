@@ -1,9 +1,10 @@
 ---
 layout: post
 title: Speed-running Integer Factorization with AI
-date:   2026-04-12 09:38:08 -0700
 categories: jekyll update
 ---
+
+[The repo.][repo]
 
 The [quadratic sieve][quad-sieve] is a fast integer factorization algorithm:
 if a positive integer $N$ is the product of two large prime numbers $$N = pq$$,
@@ -13,15 +14,13 @@ then quadratic sieve will find the two factors reasonably quickly.
 This is much faster than trial division (runtime $$\sqrt{N} \approx 2^{n/2}$$)
 but still not even close to a polynomial-time algorithm.
 
-// delete this?  too much theory
-
 Integer factorization is relevant because, if you can factor large integers,
-you can break the [RSA cryptosystem][RSA].
+you can break the [RSA cryptosystem][rsa].
 In fact, it's precisely because of quadratic sieve and [algorithms like it][gnfs]
-that many systems have switched over from RSA to [elliptic curve cryptography][ECC]
+that many systems have switched over from RSA to [elliptic curve cryptography][ecc]
 in recent years.
 
-Anyway, I'm going to implement quadratic sieve on an [NVidia RTX 3050][rtx],
+Anyway, I'm going to implement quadratic sieve on an Nvidia RTX 3050,
 with some help from OpenAI's Codex.
 I want to see what size of integer I can factor in a reasonable amount of time
 (let's say one minute or so).
@@ -35,7 +34,7 @@ but I'm still experimenting to see just how much I can get the AI to do.
 
 ## Summary: what coding agents can and can't do
 
-Before I get to the juicy details I want to lead with what I've learned from working with Codex.
+Before I get to the juicy details, here's what I've learned from working with Codex.
 
 Codex is very, very good at basic coding tasks.
 It never forgets semicolons.  Its code always compiles.
@@ -56,23 +55,26 @@ Even though I told Codex I was interested in optimizing performance,
 the agent was reluctant to run experiments and gather data.
 For example:
   - The agent gave up on a small factorization task because it only found half the necessary number of relations.
-  But I told Codex the target was 60 seconds, and the program only ran for about 1 second.
-  The solution -- double or triple the size of the search space -- would have been obvious
+  But the target was 60 seconds, and the program only ran for about 1 second.
+  The solution -- to double or triple the size of the search space -- would have been obvious
   if Codex had measured the runtime.
   - On a longer-running program, the agent put a bunch of effort into optimizing a trivially small code path
   (the is_squarefree() function).
   This function took one millisecond out of a total of about 4 seconds of execution.
   Again, a misdirected effort that could have been prevented by some simple timing.
   In fact, it's even worse: (1) Codex already had timing data in context, it just had to look, and 
-  (2) even without experimental data, it should have been clear that is_squarefree() just isn't the bottleneck here.
+  (2) even without experimental data, it should have been clear that is_squarefree() just wasn't the bottleneck here.
 
 - Theoretical analysis (asymptotic estimates, etc.).
-  I found that Codex could do this sort of thing pretty well if I held its hand,
+  Codex can do this sort of thing pretty well if I hold its hand,
   but by default Codex would rather code than think.
-  - The code was struggling to find enough relations, so Codex suggested decreasing the factor base bound $$B$$.
-  In fact the solution is precisely the opposite.
-  - I got a huge performance boost by figuring out the best search space to search for relations.
-  Codex can help with this but only if I ask a long series of pointed leading questions.
+  - When the search could not find enough relations, Codex suggested decreasing the factor base bound $$B$$.
+  In fact the solution is precisely the opposite: making $$B$$ bigger makes relations more plentiful.
+  - It's important to find the best search space to search for relations; 
+  doing this right gives a huge performance boost.
+  It takes a big of theoretical work to figure out the search space.
+  (It's nothing terribly complicated; I explain the basics further down in this post.)
+  Codex can do every step of the calculation, but I couldn't get it to do the full analysis with any degree of autonomy.
 
 In summary: Codex is a terrific coder and a great productivity boost.
 If I want to get more out of it, the next challenge is to get it to divide its efforts
@@ -86,8 +88,7 @@ I want to give you a sense of
 - how amenable things are to parallelization on GPU.
 
 
-
-// link to Python implementation
+If you like to read code, take a look at a basic [Python implementation][impl].
 
 Just to fix ideas, imagine that $N = pq$ is a 100-200 bit integer (30-70 digits),
 and the primes $p$ and $q$ are about the same size.
@@ -231,7 +232,7 @@ We've just gone from a pure-compute regime where each thread can
 to a random-access regime where each thread is making its own individual, unpredictable
 writes to global memory.
 
-On a GPU (at least most NVidia GPUs are like this), threads are organized in "warps" of 32.
+On a GPU (at least most Nvidia GPUs are like this), threads are organized in "warps" of 32.
 All the threads in a warp execute the same instruction in lockstep,
 on the same streaming multiprocessor, with access to the same low-latency shared memory.
 (Actually, I'm simplifying things somewhat.
@@ -262,19 +263,70 @@ leads to a substantial (5-10x) slowdown in the search phase.
 
 ### A more efficient solution
 
-(To follow)
+A hybrid approach, a sort of "data-local sieving," turns out to give the best of both worlds.
 
+A block of threads collaboratively loads a number of $x$ values (1024 values works well) 
+into high-bandwidth shared memory.
+Once the values have been loaded, the threads will run the sieving procedure on these 1024 values.
+{% highlight cpp %}
+// load 1024 x values into shared memory
 
-{% highlight ruby %}
-def print_hi(name)
-  puts "Hi, #{name}"
-end
-print_hi('Tom')
-#=> prints 'Hi, Tom' to STDOUT.
+for (int p_idx = threadIdx.x; p_idx < n_primes; p_idx += blockDim.x) {
+    int p = primes[p_idx];
+    // x_start = first multiple of p in this interval
+    for (int x = x_start; x < x_end; x += p) {
+        // label x as a multiple of p
+    }
+}
+
+// write those 1024 x values back into global memory
 {% endhighlight %}
+
+As far as memory is concerned, this approach requires only one DRAM read and one write per $x$.  Clearly this is best possible.
+
+As for computation, we keep most of the benefits of sieving.
+Remember: the total computation per prime $p$ is ```num_x``` with the naive algorithm,
+versus $num_x / p$ with sieving -- so sieving gives a factor of $p$ savings.
+This algorithm processes 1024 values of $x$ at a cost of
+\\[ 1 + 1024 / p: \\]
+the initial calculation of ```x_start``` is required once, 
+but the inner loop strides through the $x$ values in steps of $p$.
+The total cost for all $num_x$ values is
+\\[ num_x \left ( \frac{1}{1024} + \frac{1}{p} \right ). \\]
+In words:
+- When $p < 1024$, the algorithm is almost as compute-efficient as sieving.
+- When $p > 1024$, the algorithm is 1024 times faster than the naive algorithm.
+That's pretty good.
+
+One more note: From experiments, it turns out to be most efficient
+to run the naive algorithm for very small primes ($p < 32$),
+and then switch to this hybrid memory-local sieve for $p > 32$.
+
+## What's next?
+
+We've done some pretty good optimizations on the search phase.
+Next I want to see what we can do about:
+- solve, and
+- preprocessing.
+
+The solve phase involves row-reducing a binary matrix.
+It's not the most natural candidate for parallelization --
+too much memory interaction between rows -- 
+but I'm doing some experiments to see if I can get speedup on a GPU.
+
+The preprocessing phase is also surprisingly time-consuming
+(~20 sec for a 192-bit $N$).
+Here again there is room to optimize by factoring out some
+parallelization-friendly parts for execution on GPU.
+
 
 
 [quad-sieve]: https://en.wikipedia.org/wiki/Quadratic_sieve
+[rsa]: https://en.wikipedia.org/wiki/RSA_cryptosystem
+[gnfs]: https://en.wikipedia.org/wiki/General_number_field_sieve
+[ecc]: https://en.wikipedia.org/wiki/Elliptic-curve_cryptography
 [row-reduce]: https://en.wikipedia.org/wiki/Gaussian_elimination
 [Wiedemann]: https://en.wikipedia.org/wiki/Block_Wiedemann_algorithm
 [sieve]: https://en.wikipedia.org/wiki/Sieve_of_Eratosthenes
+[impl]: https://github.com/brian-lawrence-math/quadratic-sieve/blob/main/python/qs.py
+[repo]: https://github.com/brian-lawrence-math/quadratic-sieve
