@@ -1,5 +1,6 @@
 ---
 layout: post
+date: April 2026
 title: Speed-running Integer Factorization with AI
 categories: jekyll update
 ---

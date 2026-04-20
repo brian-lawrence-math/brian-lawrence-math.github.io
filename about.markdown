@@ -6,7 +6,11 @@ permalink: /about/
 
 Hi, I'm Brian.
 
-[Here](https://people.math.wisc.edu/lawrence/)
-is my old math page.
+I spent the last year-and-change 
+[bridging](https://0xparc.org/) the gap between modern cryptographic
+theory and practice.
 
+Before that, I worked on pure math,
+with a focus on number theory and arithmetic geometry.
+You can find more about my math research at my old [homepage](https://people.math.wisc.edu/lawrence/).
 
